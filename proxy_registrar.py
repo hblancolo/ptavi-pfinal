@@ -10,6 +10,7 @@ import socket
 import time
 import json
 import hashlib
+import random
 from xml.sax import make_parser
 from xml.sax.handler import ContentHandler
 
@@ -55,7 +56,7 @@ class SIPRegisterHandler(socketserver.DatagramRequestHandler):
     dest_user = ['']  # variable global, para guardar el nombre del usuario
                       # invitado y poder sacar sus parametros al recibir el ACK
                       # del cliente
-    nonce = '898989898798989898989'
+    nonce = []
 
     def check_expires(self):
         """
@@ -89,10 +90,66 @@ class SIPRegisterHandler(socketserver.DatagramRequestHandler):
         utiliza en el servidor Registrar
         """
         try:
-            fich_json = open('registered.json', 'r')
+            fich_json = open(PATH_Register, 'r')
             self.dic = json.load(fich_json)
         except:
             pass
+
+    def via_proxy(self):
+        rand_number = str(random.randint(0, 99999999999999999999999999999999))
+        via_value = '898989898798989898989'
+        authenticate = hashlib.md5()
+        authenticate.update(bytes(rand_number, 'utf-8'))
+        authenticate.update(bytes(via_value, 'utf-8'))
+        authenticate.digest
+        branch_part = authenticate.hexdigest()
+        branch = ('z9hG4bK' + branch_part)
+        self.via = ('Via: SIP/2.0/UDP ' + NAME_PROXY + ';branch=' + branch)
+
+    def connection_to_server(self, method, ip_invited_user, port_invited_user,
+                             line_str):
+        """
+        Proceso para la comunicación del proxy con el uaserver y los reenvios
+        al uaclient.
+        """
+        my_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        my_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        my_socket.connect((ip_invited_user, port_invited_user))
+        event2log('Starting socket...')
+
+        self.via_proxy()
+
+        new_line_str = line_str.split('SIP/2.0\r\n')
+        line_str = (new_line_str[0] + 'SIP/2.0\r\n' +
+                    self.via + '\r\n' + new_line_str[1])
+        my_socket.send(bytes(line_str, 'utf-8')+b'\r\n\r\n')
+        event2log(('Sent to ' + ip_invited_user + ':' +
+                   str(port_invited_user) + ' ' + line_str))
+
+        if method in ['INVITE', 'BYE']:
+            data = my_socket.recv(1024)
+            received_line = data.decode('utf-8')
+            event2log(('Received from ' + ip_invited_user + ':' +
+                       str(port_invited_user) + ' ' + received_line))
+
+            if 'Content-Type' not in received_line:
+                LINE = (received_line.split('\r\n\r\n')[0] + '\r\n' +
+                        self.via + '\r\n\r\n')
+            else:
+                pieces = received_line.split('\r\n\r\n')
+                LINE = (pieces[0] + '\r\n' + self.via + '\r\n\r\n' +
+                        pieces[1] + '\r\n' + self.via + '\r\n\r\n' +
+                        pieces[2].split('Content')[0] +
+                        self.via + '\r\n' + 'Content' +
+                        pieces[2].split('Content')[1] + '\r\n\r\n' +
+                        pieces[3] + '\r\n\r\n')
+
+            self.wfile.write(bytes(LINE, 'utf-8'))
+            event2log(('Sent to ' + self.client_address[0] + ':' +
+                       str(self.client_address[1]) + ' ' + received_line))
+
+        my_socket.close()
+        event2log('Finishing socket.')
 
     def handle(self):
         """
@@ -109,7 +166,7 @@ class SIPRegisterHandler(socketserver.DatagramRequestHandler):
         event2log(('Received from ' + self.client_address[0] + ':' +
                    str(self.client_address[1]) + ' ' + line_str))
 
-        #self.json2registered()
+        self.json2registered()
 
         # Condiciones iniciales para funcionamiento del proxy/registrar
         if len(list_linecontent) >= 3:
@@ -129,6 +186,8 @@ class SIPRegisterHandler(socketserver.DatagramRequestHandler):
 
         if valid_method and valid_request:
             if method == 'REGISTER':
+                self.nonce.append(str(random.randint(0,
+                                                     999999999999999999999)))
                 user = list_linecontent[1].split(':')[1]
                 for elem in allowed_users:
                     if elem['user'] == user:
@@ -141,7 +200,7 @@ class SIPRegisterHandler(socketserver.DatagramRequestHandler):
                     hash_received = line_str.split('"')[1]
                     authenticate = hashlib.md5()
                     authenticate.update(bytes(passwd, 'utf-8'))
-                    authenticate.update(bytes(self.nonce, 'utf-8'))
+                    authenticate.update(bytes(self.nonce[0], 'utf-8'))
                     authenticate.digest
                     if hash_received == authenticate.hexdigest():
                         self.dic[user] = [{'ip': ip_ua},
@@ -152,74 +211,59 @@ class SIPRegisterHandler(socketserver.DatagramRequestHandler):
                         event2log(('Sent to ' + self.client_address[0] + ':' +
                                    str(self.client_address[1]) + ' ' +
                                    'SIP/2.0 200 OK\r\n\r\n'))
+                        self.nonce.clear()
 
                     else:
                         print('Client password is not correct')
-                        self.wfile.write(b'SIP/2.0 400 Bad Request\r\n\r\n')
+                        self.wfile.write(b'SIP/2.0 401 Unauthorized\r\n\r\n')
                         event2log(('Sent to ' + self.client_address[0] + ':' +
                                    str(self.client_address[1]) + ' ' +
-                                   'SIP/2.0 400 Bad Request\r\n\r\n'))
+                                   'SIP/2.0 401 Unauthorized\r\n\r\n'))
 
                 elif ('Digest' not in list_linecontent) and (valid_user is
                                                              False):
                     print('Error: Unknown user trying to register')
                     self.wfile.write(bytes("SIP/2.0 401 Unauthorized\r\n" +
                                            'WWW Authenticate: Digest nonce="' +
-                                           self.nonce + '"\r\n\r\n', 'utf-8'))
+                                           self.nonce[0] +
+                                           '"\r\n\r\n', 'utf-8'))
                     event2log(('Sent to ' + self.client_address[0] + ':' +
                                str(self.client_address[1]) + ' ' +
                                "SIP/2.0 401 Unauthorized\r\n" +
                                'WWW Authenticate: Digest nonce="' +
-                               self.nonce + '"\r\n\r\n'))
+                               self.nonce[0] + '"\r\n\r\n'))
                 else:
                     self.wfile.write(bytes("SIP/2.0 401 Unauthorized\r\n" +
                                            'WWW Authenticate: Digest nonce="' +
-                                           self.nonce + '"\r\n\r\n', 'utf-8'))
+                                           self.nonce[0] +
+                                           '"\r\n\r\n', 'utf-8'))
                     event2log(('Sent to ' + self.client_address[0] + ':' +
                                str(self.client_address[1]) + ' ' +
                                "SIP/2.0 401 Unauthorized\r\n" +
                                'WWW Authenticate: Digest nonce="' +
-                               self.nonce + '"\r\n\r\n'))
+                               self.nonce[0] + '"\r\n\r\n'))
 
             elif method == 'INVITE':
                 invited_user = list_linecontent[1].split(':')[1]
-                registered_user = False
+                registered_invited_user = False
+                sdp = line_str.split('\r\n\r\n')[1]
+                o_user_name = sdp.split('\r\n')[1].split('=')[1].split(' ')[0]
+                registered_o_user = False
                 for usuario in self.dic:
                     if invited_user == usuario:
-                        registered_user = True
+                        registered_invited_user = True
                         ip_invited_user = self.dic[invited_user][0]['ip']
                         port_invited_user = self.dic[invited_user][1]['port']
                         port_invited_user = int(port_invited_user)
                         self.dest_user[0] = invited_user  # lo guardo en
                                                           # variable global
-                if registered_user is True:
+                    if o_user_name == usuario:
+                        registered_o_user = True
+
+                if registered_invited_user and registered_o_user:
                     try:
-                        my_socket = socket.socket(socket.AF_INET,
-                                                  socket.SOCK_DGRAM)
-                        my_socket.setsockopt(socket.SOL_SOCKET,
-                                             socket.SO_REUSEADDR, 1)
-                        my_socket.connect((ip_invited_user,
-                                           port_invited_user))
-                        event2log('Starting socket...')
-
-                        my_socket.send(bytes(line_str, 'utf-8')+b'\r\n\r\n')
-                        event2log(('Sent to ' + ip_invited_user + ':' +
-                                   str(port_invited_user) + ' ' + line_str))
-
-                        data = my_socket.recv(1024)
-                        received_line = data.decode('utf-8')
-                        print('Recibido del servidor: ', received_line)
-                        event2log(('Received from ' + ip_invited_user + ':' +
-                                   str(port_invited_user) + ' ' +
-                                   received_line))
-
-                        self.wfile.write(data)
-                        event2log(('Sent to ' + self.client_address[0] + ':' +
-                                   str(self.client_address[1]) + ' ' +
-                                   received_line))
-
-                        my_socket.close()
-                        event2log('Finishing socket.')
+                        self.connection_to_server(method, ip_invited_user,
+                                                  port_invited_user, line_str)
 
                     except ConnectionRefusedError:
                         print('No server listening at: ' + ip_invited_user +
@@ -227,7 +271,11 @@ class SIPRegisterHandler(socketserver.DatagramRequestHandler):
                         event2log('Error: No server listening at ' +
                                   ip_invited_user + ' port ' +
                                   str(port_invited_user))
-
+                elif not registered_o_user:
+                    self.wfile.write(b'SIP/2.0 401 Unauthorized\r\n\r\n')
+                    event2log(('Sent to ' + self.client_address[0] + ':' +
+                               str(self.client_address[1]) + ' ' +
+                               'SIP/2.0 401 Unauthorized\r\n\r\n'))
                 else:
                     self.wfile.write(b'SIP/2.0 404 User Not Found\r\n\r\n')
                     event2log(('Sent to ' + self.client_address[0] + ':' +
@@ -240,19 +288,8 @@ class SIPRegisterHandler(socketserver.DatagramRequestHandler):
                 port_invited_user = int(self.dic[invited_user][1]['port'])
 
                 try:
-                    my_socket = socket.socket(socket.AF_INET,
-                                              socket.SOCK_DGRAM)
-                    my_socket.setsockopt(socket.SOL_SOCKET,
-                                         socket.SO_REUSEADDR, 1)
-                    my_socket.connect((ip_invited_user, port_invited_user))
-                    event2log('Starting socket...')
-
-                    my_socket.send(bytes(line_str, 'utf-8') + b'\r\n\r\n')
-                    event2log(('Sent to ' + ip_invited_user + ':' +
-                               str(port_invited_user) + ' ' + line_str))
-
-                    my_socket.close()
-                    event2log('Finishing socket.')
+                    self.connection_to_server(method, ip_invited_user,
+                                              port_invited_user, line_str)
                 except ConnectionRefusedError:
                     self.wfile.write(b'SIP/2.0 404 User Not Found\r\n\r\n')
                     event2log(('Sent to ' + self.client_address[0] + ':' +
@@ -264,35 +301,19 @@ class SIPRegisterHandler(socketserver.DatagramRequestHandler):
                 port_invited_user = int(self.dic[invited_user][1]['port'])
 
                 try:
-                    my_socket = socket.socket(socket.AF_INET,
-                                              socket.SOCK_DGRAM)
-                    my_socket.setsockopt(socket.SOL_SOCKET,
-                                         socket.SO_REUSEADDR, 1)
-                    my_socket.connect((ip_invited_user, port_invited_user))
-                    event2log('Starting socket...')
-
-                    my_socket.send(bytes(line_str, 'utf-8')+b'\r\n\r\n')
-                    event2log(('Sent to ' + ip_invited_user + ':' +
-                               str(port_invited_user) + ' ' + line_str))
-
-                    data = my_socket.recv(1024)
-                    received_line = data.decode('utf-8')
-                    event2log(('Received from ' + ip_invited_user + ':' +
-                               str(port_invited_user) + ' ' + received_line))
-
-                    self.wfile.write(data)
-                    event2log(('Sent to ' + self.client_address[0] + ':' +
-                               str(self.client_address[1]) + ' ' +
-                               received_line))
-
-                    my_socket.close()
-                    event2log('Finishing socket.')
+                    self.connection_to_server(method, ip_invited_user,
+                                              port_invited_user, line_str)
 
                 except ConnectionRefusedError:
                     self.wfile.write(b'SIP/2.0 404 User Not Found\r\n\r\n')
                     event2log(('Sent to ' + self.client_address[0] + ':' +
                                str(self.client_address[1]) + ' ' +
                                'SIP/2.0 404 User Not Found\r\n\r\n'))
+            else:
+                self.wfile.write(b'SIP/2.0 404 User Not Found\r\n\r\n')
+                event2log(('Sent to ' + self.client_address[0] + ':' +
+                           str(self.client_address[1]) + ' ' +
+                           'SIP/2.0 404 User Not Found\r\n\r\n'))
 
         self.check_expires()
         self.register2json()
