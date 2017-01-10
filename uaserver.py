@@ -32,6 +32,7 @@ class EchoHandler(socketserver.DatagramRequestHandler):
         method = list_linecontent[0]
         event2log(('Received from ' + self.client_address[0] + ':' +
                    str(self.client_address[1]) + ' ' + line_str))
+        print('Recibido del proxy: \n' + line_str)
 
 #        self.json2registered()
 
@@ -80,7 +81,12 @@ class EchoHandler(socketserver.DatagramRequestHandler):
                 event2log(('Sent to ' + self.ip_client[0] + ':' +
                            self.p_rtp_client[0] + ' ' + fichero_audio +
                            ' via RTP protocol'))
+
+                print('Listening rtp in: ' + IP_UASERVER + ':' + str(PORT_RTP))
+                os.system('cvlc rtp://@' + IP_UASERVER + ':' + str(PORT_RTP))
+
             elif method == 'BYE':
+                print('BYE received, sending 200 OK...')
                 self.wfile.write(b'SIP/2.0 200 OK\r\n\r\n')
                 event2log(('Sent to ' + self.client_address[0] + ':' +
                            str(self.client_address[1]) + ' ' +
