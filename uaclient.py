@@ -104,8 +104,7 @@ if __name__ == "__main__":
             if OPTION == USER_NAME:
                 sys.exit('Error: you are saying "BYE" to yourself. Try to say'
                          '"BYE" to the one you have invited before.')
-            LINE = (METHOD + ' sip:' + USER_NAME + ':' + str(PORT_UASERVER) +
-                    ' SIP/2.0\r\nExpires: ' + str(OPTION))
+            LINE = (METHOD + ' sip:' + str(OPTION) + ' SIP/2.0')
 
         my_socket.send(bytes(LINE, 'utf-8') + b'\r\n\r\n')
         event2log(('Sent to ' + IP_PROXY + ':' + str(PORT_PROXY) + ' ' + LINE))
@@ -115,10 +114,6 @@ if __name__ == "__main__":
         print('Received -- ', received_line)
         event2log(('Received from ' + IP_PROXY + ':' + str(PORT_PROXY) +
                    ' ' + received_line))
-
-        confirmation_invite = ('SIP/2.0 100 Trying\r\n\r\n'
-                               'SIP/2.0 180 Ring\r\n\r\n'
-                               'SIP/2.0 200 OK\r\n')
 
         if (METHOD == 'REGISTER') and ('SIP/2.0 401' in received_line):
             nonce = received_line.split('"')[1]
@@ -140,16 +135,19 @@ if __name__ == "__main__":
             event2log(('Received from ' + IP_PROXY + ':' + str(PORT_PROXY) +
                        ' ' + received_line))
 
-        elif (METHOD == 'INVITE') and (received_line.split('Content-Type')[0]
-                                       == confirmation_invite):
+        elif (METHOD == 'INVITE') and 'OK' in received_line:
+            print('Recibido del proxy: \n' + received_line)
             METHOD = 'ACK'
-            LINE = (METHOD + ' sip:' + USER_NAME + ':' + str(PORT_UASERVER) +
-                    ' SIP/2.0')
+            LINE = (METHOD + ' sip:' + OPTION + ' SIP/2.0')
             my_socket.send(bytes(LINE, 'utf-8') + b'\r\n\r\n')
-            print('ACK transmitted. Starting rtp transmission...')
+            print('ACK transmitted.')
             event2log(('Sent to ' + IP_PROXY + ':' + str(PORT_PROXY) +
                        ' ' + LINE))
 
+            print('Listening rtp in: ' + IP_UASERVER + ':' + str(PORT_RTP))
+            os.system('cvlc rtp://@' + IP_UASERVER + ':' + str(PORT_RTP))
+
+            print('Starting rtp transmission...')
             sdp_received = received_line.split('\r\n\r\n')[-2]
             ip_server = sdp_received.split('\r\n')[1].split(' ')[1]
             p_rtp_server = sdp_received.split('\r\n')[4].split(' ')[1]
