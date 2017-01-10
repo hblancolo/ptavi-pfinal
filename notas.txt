@@ -1,0 +1,74 @@
+               ----------> REQUISITOS AVANZADOS <----------
+
+1. Cabecera Proxy: en el programa proxy_registrar.py se ha implementado un
+método que gestiona las comunicaciones con el servidor y los reenvíos de 
+mensajes hacia el cliente (connection_to_server). Es en este método donde se
+ha añadido la cabecera "Via:..." a los mensajes que el proxy reenvía en 
+cualquiera de los sentidos. Para la creación de la cabecera "Via:..." además 
+se ha implementado otro método (via_proxy) que genera un branch para el proxy a 
+partir del valor "nonce" y de un número entero pseudoaleatorio para cada 
+paquete reenviado por el proxy. El método via_proxy genera la cabecera Via 
+utilizando el valor branch y el nombre del proxy.
+
+2. Reestablecer usuarios conectados: puesto que el registro de usuarios que he 
+utilizado en el proxy lo he ido almacenando en un fichero .json mediante
+el método register2json, a través de otro método json2registered conseguimos
+recuperar el registro de usuarios si ya existiera un registro.json existente.
+Para su implementación se han usado funciones de conversión entre ficheros json
+y estructuras de datos de python.
+
+3. Integración de (c)vlc: se han utilizado la orden os.system con el comando 
+indicado en el enunciado. Primero es el cliente el que abre el vlc para 
+reproducir el audio que recibe del servidor (a veces el vlc tarda en arrancar
+y entonces empieza a reproducir el audio cuando ya casi ha terminado el envio
+rtp). Una vez termina de recibir rtp, deberemos hacer ctrl + c en el cliente
+para que este comience a transmitir el rtp al servidor, que justo despues de 
+haber terminado su envío rtp ya habrá ejecutado el vlc y estará escuchando
+en el puerto deseado. Una vez termine la recepción de rtp en el servidor, 
+haremos ctrl + c en el servidor para cerrar el vlc y que el programa siga 
+funcionando con normalidad.
+
+
+              ----------> IMPLEMENTACIONES EXTRA <----------
+
+1. -- uaclient.py, uaserver.py -- Si el fichero de audio especificado en el 
+archivo de configuración del UA no existe, la ejecución del programa cliente o
+servidor terminará por completo ltará un error: The file "file_name" does not
+exist.
+
+2. -- uaclient.py -- Se garantiza que los únicos métodos posibles a introducir 
+por la shell en el programa del cliente serán ['REGISTER', 'INVITE', 'BYE'].
+Así pues evitaremos problemas si por ejemplo alguien introdujera el método
+'ACK' (pues es un método con funcionalidad en el cliente y causaría problemas).
+
+3. -- uaclient.py -- A la hora de hacer un INVITE si el usuario invitado es el 
+mismo que el que realiza la invitación, el programa cliente parará su 
+ejecución y mostrará un mensaje de error que advierte sobre el problema.
+
+4. -- uaclient.py -- Se ha relizado una implementación similar a la anterior 
+pero para el caso en que tratemos de mandar un mensaje BYE al mismo usuario que
+esta haciendo el BYE.
+
+5. -- uaclient.py, uaserver.py -- Para las transmisiones RTP en ambos sentidos
+se han incluido además trazas que indican en el transmisor cuando se ha 
+terminado la transmisión. Además cuando se comienza un envío RTP éste es 
+registrado en el fichero de log con la forma "Sent to...".
+
+6. -- proxy_registrar.py -- Si el número hexadecimal de autorización, que envía
+el cliente tras haber recibido el nonce, no es igual al del proxy, se mostrará
+un mensaje advirtiendo de que la contraseña del usuario no es correcta (porque
+no se corresponde con la del fichero passwords). Además el proxy enviará un
+mensaje de error 400 Bad Request al cliente.
+
+7. -- proxy_registrar.py -- Si el usuario del fichero de configuración del UA
+no se corresponde con alguno de los usuarios del fichero passwords y trata de
+registrarse, saltará un error "Unknown user trying to register". Además al 
+cliente se le enviará un error 401 Unauthorized.
+
+8. -- proxy_registrar.py -- En las comunicaciones con los servidores de los UA
+saltará un error "No server listening at..." cuando el servidor del UA no haya
+sido lanzado. Este error también se registrará en el log.
+
+
+
+
